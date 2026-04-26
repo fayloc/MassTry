@@ -1,131 +1,290 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>MassTry Chat</title>
+<meta charset="UTF-8">
+<title>MassTry Messenger</title>
 
-    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #0f0f0f;
-            color: white;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
+<style>
+body {
+    margin: 0;
+    font-family: Arial;
+    background: #0e1621;
+    color: white;
+}
 
-        h2 {
-            margin-top: 15px;
-        }
+/* Layout */
+.app {
+    display: flex;
+    height: 100vh;
+}
 
-        #chat {
-            width: 90%;
-            max-width: 700px;
-            height: 70vh;
-            background: #1e1e1e;
-            border-radius: 10px;
-            padding: 10px;
-            overflow-y: auto;
-            margin-top: 10px;
-        }
+/* Sidebar */
+.sidebar {
+    width: 300px;
+    background: #17212b;
+    display: flex;
+    flex-direction: column;
+}
 
-        .msg {
-            background: #2a2a2a;
-            padding: 8px 10px;
-            margin: 6px 0;
-            border-radius: 8px;
-            word-wrap: break-word;
-        }
+.header {
+    padding: 15px;
+    border-bottom: 1px solid #222;
+}
 
-        .system {
-            color: #aaa;
-            font-style: italic;
-        }
+.search {
+    padding: 10px;
+}
 
-        #inputArea {
-            width: 90%;
-            max-width: 700px;
-            display: flex;
-            margin-top: 10px;
-        }
+.search input {
+    width: 100%;
+    padding: 8px;
+    border-radius: 8px;
+    border: none;
+}
 
-        input {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            outline: none;
-            font-size: 14px;
-        }
+.user {
+    padding: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+}
 
-        button {
-            margin-left: 10px;
-            padding: 12px 16px;
-            border: none;
-            border-radius: 8px;
-            background: #4caf50;
-            color: white;
-            cursor: pointer;
-        }
+.user:hover {
+    background: #1f2c38;
+}
 
-        button:hover {
-            background: #43a047;
-        }
-    </style>
+.avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+
+.online {
+    width: 8px;
+    height: 8px;
+    background: lime;
+    border-radius: 50%;
+    margin-left: auto;
+}
+
+/* Chat */
+.chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-header {
+    padding: 15px;
+    background: #17212b;
+    border-bottom: 1px solid #222;
+}
+
+.messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.msg {
+    margin: 5px 0;
+    max-width: 60%;
+    padding: 10px;
+    border-radius: 10px;
+}
+
+.me {
+    background: #2b5278;
+    margin-left: auto;
+}
+
+.other {
+    background: #1e2c3a;
+}
+
+.input-area {
+    display: flex;
+    padding: 10px;
+    background: #17212b;
+}
+
+input[type="text"] {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+}
+
+button {
+    margin-left: 5px;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    background: #2b5278;
+    color: white;
+    cursor: pointer;
+}
+</style>
 </head>
 
 <body>
 
-<h2>💬 MassTry Chat</h2>
+<div class="app">
 
-<div id="chat"></div>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="header">
+            👤 {{ username }}
+        </div>
 
-<div id="inputArea">
-    <input id="msg" placeholder="Введите сообщение...">
-    <button onclick="sendMsg()">Отправить</button>
+        <div class="search">
+            <input id="search" placeholder="Поиск..." oninput="find()">
+        </div>
+
+        <div id="users"></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat">
+
+        <div class="chat-header" id="chatName">
+            Выберите чат
+        </div>
+
+        <div class="messages" id="messages"></div>
+
+        <div class="input-area">
+            <input id="msg" placeholder="Сообщение...">
+
+            <input type="file" id="file" hidden>
+            <button onclick="document.getElementById('file').click()">📎</button>
+
+            <button onclick="send()">➤</button>
+        </div>
+
+    </div>
+
 </div>
 
 <script>
-    var socket = io();
+let socket = io();
+let username = "{{ username }}";
+let currentUser = null;
 
-    let name = prompt("Введите имя:");
-    if (!name) name = "Anon";
+// ===== УВЕДОМЛЕНИЯ =====
+if (Notification.permission !== "granted") {
+    Notification.requestPermission();
+}
 
-    socket.emit("join", name);
+function notify(text) {
+    if (Notification.permission === "granted") {
+        new Notification(text);
+    }
+}
 
-    const chat = document.getElementById("chat");
+// ===== ПОИСК =====
+function find() {
+    let q = document.getElementById("search").value;
 
-    socket.on("message", function(data) {
-        const div = document.createElement("div");
+    fetch("/search?q=" + q)
+    .then(r => r.json())
+    .then(data => {
+        let div = document.getElementById("users");
+        div.innerHTML = "";
 
-        if (data.includes("вошёл") || data.includes("вышел")) {
-            div.classList.add("msg", "system");
-        } else {
-            div.classList.add("msg");
-        }
+        data.users.forEach(u => {
+            let el = document.createElement("div");
+            el.className = "user";
 
-        div.innerText = data;
-        chat.appendChild(div);
+            el.innerHTML = `
+                <img class="avatar" src="/avatar/${u}">
+                ${u}
+                <div class="online"></div>
+            `;
 
-        chat.scrollTop = chat.scrollHeight;
+            el.onclick = () => openChat(u);
+            div.appendChild(el);
+        });
     });
+}
 
-    function sendMsg() {
-        const input = document.getElementById("msg");
-        const text = input.value;
+// ===== ОТКРЫТЬ ЧАТ =====
+function openChat(user) {
+    currentUser = user;
+    document.getElementById("messages").innerHTML = "";
+    document.getElementById("chatName").innerText = user;
 
-        if (text.trim() !== "") {
-            socket.send(text);
-            input.value = "";
-        }
+    socket.emit("join", {
+        user: username,
+        target: user
+    });
+}
+
+// ===== ПОЛУЧЕНИЕ СООБЩЕНИЙ =====
+socket.on("message", data => {
+    let div = document.createElement("div");
+    div.className = "msg";
+
+    if (data.sender === username) {
+        div.classList.add("me");
+    } else {
+        div.classList.add("other");
+        notify(data.sender + ": " + data.text);
     }
 
-    document.addEventListener("keydown", function(e) {
-        if (e.key === "Enter") sendMsg();
+    if (data.file) {
+        div.innerHTML = data.sender + ": <a href='" + data.file + "' target='_blank'>📎 файл</a>";
+    } else {
+        div.innerText = data.sender + ": " + data.text;
+    }
+
+    let chat = document.getElementById("messages");
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+});
+
+// ===== ОТПРАВКА =====
+function send() {
+    let text = document.getElementById("msg").value;
+    let fileInput = document.getElementById("file");
+
+    if (fileInput.files.length > 0) {
+        let formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+
+        fetch("/upload", {
+            method: "POST",
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            socket.emit("send_message", {
+                sender: username,
+                receiver: currentUser,
+                file: data.url
+            });
+        });
+
+        fileInput.value = "";
+        return;
+    }
+
+    socket.emit("send_message", {
+        sender: username,
+        receiver: currentUser,
+        text: text
     });
+
+    document.getElementById("msg").value = "";
+}
+
+// ENTER
+document.addEventListener("keydown", e => {
+    if (e.key === "Enter") send();
+});
 </script>
 
 </body>
